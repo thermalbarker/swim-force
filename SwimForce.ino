@@ -14,7 +14,7 @@ Adafruit_7segment matrix = Adafruit_7segment();
 
 const int buttonPin = 4;
 
-float calibration_factor = 1585; // Should be Newtons
+float calibration_factor = 2219; // Should be Newtons
 
 float distance = 0.0;
 
