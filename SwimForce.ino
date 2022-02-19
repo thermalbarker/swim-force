@@ -29,15 +29,16 @@
 
 #define DOUT  3
 #define CLK  2
-byte statLED = 13; //On board status LED
-
+byte boardLED = 6;
+byte powerLED = 9;
+byte buttonLED = 10;
 HX711 scale;
 
 Adafruit_7segment matrix = Adafruit_7segment();
 Adafruit_7segment matrix2 = Adafruit_7segment();
 Adafruit_24bargraph bar = Adafruit_24bargraph();
 
-const int buttonPin = 4;
+const int buttonPin = 5;
 
 float calibration_factor = 2219; // Should be Newtons
 
@@ -58,7 +59,9 @@ void setup() {
   matrix2.begin(0x71);
   bar.begin(0x72);
 
-  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(powerLED, OUTPUT);
+  pinMode(buttonLED, OUTPUT);
+  pinMode(boardLED, OUTPUT);
 
   // initialize the pushbutton pin as an input:
   pinMode(buttonPin, INPUT);
@@ -128,10 +131,13 @@ void loop() {
 
   // check if the pushbutton is pressed. If it is, the buttonState is HIGH:
   if (buttonState == HIGH) {
+    digitalWrite(buttonLED, HIGH);
     distance = 0;
     time = 0;
     lastDisplay = 0;
     scale.tare(); //Reset the scale to 0
+  } else {
+    digitalWrite(buttonLED, LOW);
   }
 
   long deltaT = millis() - lastMeasure;
@@ -166,6 +172,9 @@ void loop() {
     if (velocity > 0.1) {
       distance += deltaD; 
       time += deltaT;
+      digitalWrite(boardLED, HIGH);
+    } else {
+      digitalWrite(boardLED, LOW);
     }
 
     matrix.print(distance);
@@ -192,10 +201,10 @@ void loop() {
   if (millis() - lastTime > 1000)
   {
     lastTime = millis();
-    if (digitalRead(LED_BUILTIN) == LOW) {
-      digitalWrite(LED_BUILTIN, HIGH);
+    if (digitalRead(powerLED) == LOW) {
+      digitalWrite(powerLED, HIGH);
     } else {
-      digitalWrite(LED_BUILTIN, LOW);
+      digitalWrite(powerLED, LOW);
     }
   
   }

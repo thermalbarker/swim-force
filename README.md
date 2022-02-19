@@ -19,5 +19,27 @@ Build and program the SwimForce.ino file for:
  * Arduino UNO Board
  * Arduino ISP programmer
 
+# Pins
 
-
+ * Digital Pins
+   - D0: RX
+   - D1: TX
+   - D2: HX711 CLK
+   - D3: HX711 DAT
+   - D4: SPI RST
+   - D5: Switch
+   - D6: Board LED
+   - D7: SPI IRQ
+   - D8: SPI CS
+   - D9: Power LED
+   - D10: Switch LED
+   - D11: SPI MOSI
+   - D12: SPI MISO
+   - D13: SPI SCK
+ * Analog Pins
+   - A0: 
+   - A1: I2C CLK
+   - A2: I2C DAT 
+   - A3:   
+   - A4:   
+   - A5:   
