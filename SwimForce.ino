@@ -24,8 +24,11 @@
 #include "HX711.h"
 #include <Wire.h> // Enable this line if using Arduino Uno, Mega, etc.
 #include <Adafruit_GFX.h>
-#include "Adafruit_LEDBackpack.h"
+#include <Adafruit_LEDBackpack.h>
 
+#include <Adafruit_BluefruitLE_SPI.h>
+#include <ble_definitions.h>
+#include "src/BluefruitConfig/BluefruitConfig.h"
 
 #define DOUT  3
 #define CLK  2
@@ -48,6 +51,98 @@ long time = 0;
 long lastTime = 0;
 long lastMeasure = 0;
 
+/* ...hardware SPI, using SCK/MOSI/MISO hardware SPI pins and then user selected CS/IRQ/RST */
+Adafruit_BluefruitLE_SPI ble(BLUEFRUIT_SPI_CS, BLUEFRUIT_SPI_IRQ, BLUEFRUIT_SPI_RST);
+
+/* ...software SPI, using SCK/MOSI/MISO user-defined SPI pins and then user selected CS/IRQ/RST */
+//Adafruit_BluefruitLE_SPI ble(BLUEFRUIT_SPI_SCK, BLUEFRUIT_SPI_MISO,
+//                             BLUEFRUIT_SPI_MOSI, BLUEFRUIT_SPI_CS,
+//                             BLUEFRUIT_SPI_IRQ, BLUEFRUIT_SPI_RST);
+
+bool blueToothSetup = false;
+
+/* The service information */
+
+int32_t cscServiceId;
+int32_t cscFeatureId;
+int32_t cscMeasureId;
+
+bool setupBluetooth() {
+  /* Initialise the module */
+  Serial.print(F("Initialising the Bluefruit LE module: "));
+
+  if ( !ble.begin(VERBOSE_MODE) )
+  {
+    Serial.println(F("Couldn't find Bluefruit, make sure it's in CoMmanD mode & check wiring?"));
+    return false;
+  }
+  Serial.println( F("OK!") );
+
+  /* Perform a factory reset to make sure everything is in a known state */
+  Serial.println(F("Performing a factory reset: "));
+  if (! ble.factoryReset() ){
+       Serial.println(F("Couldn't factory reset"));
+       return false;
+  }
+
+  /* Disable command echo from Bluefruit */
+  ble.echo(false);
+
+  Serial.println("Requesting Bluefruit info:");
+  /* Print Bluefruit information */
+  ble.info();
+
+
+  /* Change the device name to make it easier to find */
+  Serial.println(F("Setting device name to 'SwimForce': "));
+
+  if (! ble.sendCommandCheckOK(F("AT+GAPDEVNAME=SwimForce")) ) {
+    Serial.print(F("Could not set device name?"));
+    return false;
+  }
+
+  // this line is particularly required for Flora, but is a good idea
+  // anyways for the super long lines ahead!
+  // ble.setInterCharWriteDelay(5); // 5 ms
+
+  bool success = false;
+
+  Serial.println(F("Adding the Cycling Service (UUID = 0x1816): "));
+  success = ble.sendCommandWithIntReply( F("AT+GATTADDSERVICE=UUID=0x1816"), &cscServiceId);
+  if (!success) {
+    Serial.println(F("Could not add HRM service"));
+    return false;
+  }
+
+  /* Add the Heart Rate Measurement characteristic */
+  /* Chars ID for Measurement should be 1 */
+  Serial.println(F("Adding the CTC characteristic (UUID = 0x2A5C): "));
+  success = ble.sendCommandWithIntReply( F("AT+GATTADDCHAR=UUID=0x2A5C, PROPERTIES=0x01, MIN_LEN=2, MAX_LEN=2, VALUE=00-40"), &cscFeatureId);
+  if (!success) {
+    Serial.println(F("Could not add CTC characteristic"));
+    return false;
+  }
+
+  /* Add the Body Sensor Location characteristic */
+  /* Chars ID for Body should be 2 */
+  Serial.println(F("Adding the ctc characteristic (UUID = 0x2A38): "));
+  success = ble.sendCommandWithIntReply( F("AT+GATTADDCHAR=UUID=0x2A38, PROPERTIES=0x02, MIN_LEN=1, VALUE=3"), &hrmLocationCharId);
+  if (!success) {
+    Serial.println(F("Could not add BSL characteristic"));
+    return false;
+  }
+
+  /* Add the Heart Rate Service to the advertising data (needed for Nordic apps to detect the service) */
+ // Serial.print(F("Adding Heart Rate Service UUID to the advertising payload: "));
+ // ble.sendCommandCheckOK( F("AT+GAPSETADVDATA=02-01-06-05-02-0d-18-0a-18") );
+
+  /* Reset the device for the new service setting changes to take effect */
+  Serial.print(F("Performing a SW reset (service changes require a reset): "));
+  ble.reset();
+
+  Serial.println();
+}
+
 void setup() {
   Serial.begin(9600);
   Serial.println("Swim Force");
@@ -59,12 +154,21 @@ void setup() {
   matrix2.begin(0x71);
   bar.begin(0x72);
 
+  matrix.print("Swim");
+  matrix2.print("Force");
+  matrix.writeDisplay();
+  matrix2.writeDisplay();
+
   pinMode(powerLED, OUTPUT);
   pinMode(buttonLED, OUTPUT);
   pinMode(boardLED, OUTPUT);
 
   // initialize the pushbutton pin as an input:
   pinMode(buttonPin, INPUT);
+
+  blueToothSetup = setupBluetooth();
+
+  delay(5000);
 }
 
 void writeNumberToBarChart(float num) {
