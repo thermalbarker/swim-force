@@ -27,8 +27,11 @@
 #include <Adafruit_LEDBackpack.h>
 
 #include <Adafruit_BluefruitLE_SPI.h>
-#include <ble_definitions.h>
 #include "src/BluefruitConfig/BluefruitConfig.h"
+
+#define APPEND_BUFFER(buffer,base,field) \
+    memcpy(buffer+base,&field,sizeof(field)); \
+    base += sizeof(field);
 
 #define DOUT  3
 #define CLK  2
@@ -51,6 +54,8 @@ long time = 0;
 long lastTime = 0;
 long lastMeasure = 0;
 
+bool simulate = false;
+
 /* ...hardware SPI, using SCK/MOSI/MISO hardware SPI pins and then user selected CS/IRQ/RST */
 Adafruit_BluefruitLE_SPI ble(BLUEFRUIT_SPI_CS, BLUEFRUIT_SPI_IRQ, BLUEFRUIT_SPI_RST);
 
@@ -66,6 +71,16 @@ bool blueToothSetup = false;
 int32_t cscServiceId;
 int32_t cscFeatureId;
 int32_t cscMeasureId;
+int32_t cscLocationId;
+int32_t cscControlPointId;
+
+bool BLEsetChar(Adafruit_BLE& ada_ble, uint8_t charID, uint8_t const data[], uint8_t size)
+{
+  uint16_t argtype[] = { AT_ARGTYPE_UINT8, (uint16_t) (AT_ARGTYPE_BYTEARRAY+ size) };
+  uint32_t args[] = { charID, (uint32_t) data };
+
+  return ada_ble.atcommand_full(F("AT+GATTCHAR"), NULL, 2, argtype, args);
+}
 
 bool setupBluetooth() {
   /* Initialise the module */
@@ -80,7 +95,7 @@ bool setupBluetooth() {
 
   /* Perform a factory reset to make sure everything is in a known state */
   Serial.println(F("Performing a factory reset: "));
-  if (! ble.factoryReset() ){
+  if (!ble.factoryReset() ){
        Serial.println(F("Couldn't factory reset"));
        return false;
   }
@@ -96,51 +111,116 @@ bool setupBluetooth() {
   /* Change the device name to make it easier to find */
   Serial.println(F("Setting device name to 'SwimForce': "));
 
-  if (! ble.sendCommandCheckOK(F("AT+GAPDEVNAME=SwimForce")) ) {
+  if (!ble.sendCommandCheckOK(F("AT+GAPDEVNAME=SwimForce")) ) {
     Serial.print(F("Could not set device name?"));
     return false;
   }
 
-  // this line is particularly required for Flora, but is a good idea
-  // anyways for the super long lines ahead!
-  // ble.setInterCharWriteDelay(5); // 5 ms
-
-  bool success = false;
-
   Serial.println(F("Adding the Cycling Service (UUID = 0x1816): "));
-  success = ble.sendCommandWithIntReply( F("AT+GATTADDSERVICE=UUID=0x1816"), &cscServiceId);
-  if (!success) {
+  if (!ble.sendCommandWithIntReply( F("AT+GATTADDSERVICE=UUID=0x1816"), &cscServiceId)) {
     Serial.println(F("Could not add HRM service"));
     return false;
   }
 
-  /* Add the Heart Rate Measurement characteristic */
-  /* Chars ID for Measurement should be 1 */
   Serial.println(F("Adding the CTC characteristic (UUID = 0x2A5C): "));
-  success = ble.sendCommandWithIntReply( F("AT+GATTADDCHAR=UUID=0x2A5C, PROPERTIES=0x01, MIN_LEN=2, MAX_LEN=2, VALUE=00-40"), &cscFeatureId);
-  if (!success) {
+  if (!ble.sendCommandWithIntReply( F("AT+GATTADDCHAR=UUID=0x2A5C, PROPERTIES=0x02, MIN_LEN=2, MAX_LEN=2, VALUE=0"), &cscFeatureId)) {
     Serial.println(F("Could not add CTC characteristic"));
     return false;
   }
 
-  /* Add the Body Sensor Location characteristic */
-  /* Chars ID for Body should be 2 */
-  Serial.println(F("Adding the ctc characteristic (UUID = 0x2A38): "));
-  success = ble.sendCommandWithIntReply( F("AT+GATTADDCHAR=UUID=0x2A38, PROPERTIES=0x02, MIN_LEN=1, VALUE=3"), &hrmLocationCharId);
-  if (!success) {
-    Serial.println(F("Could not add BSL characteristic"));
+  Serial.println(F("Adding the ctc characteristic (UUID = 0x2A5B): "));
+  if (!ble.sendCommandWithIntReply( F("AT+GATTADDCHAR=UUID=0x2A5B, PROPERTIES=0x12, MIN_LEN=1, MAX_LEN=11, VALUE=00-00-00-00-00-00-00-00-00-00-00"), &cscMeasureId)) {
+    Serial.println(F("Could not add CTC characteristic"));
+    return false;
+  }
+
+  Serial.println(F("Adding the ctc Location (UUID = 0x2A5D): "));
+  if (!ble.sendCommandWithIntReply( F("AT+GATTADDCHAR=UUID=0x2A5D, PROPERTIES=0x02, MIN_LEN=1, MAX_LEN=1, VALUE=0"), &cscLocationId)) {
+    Serial.println(F("Could not add CTC characteristic"));
+    return false;
+  }
+
+  Serial.println(F("Adding the ctc Location (UUID = 0x2A55): "));
+  if (!ble.sendCommandWithIntReply( F("AT+GATTADDCHAR=UUID=0x2A55, PROPERTIES=0x28, MIN_LEN=1, MAX_LEN=5, VALUE=0"), &cscControlPointId)) {
+    Serial.println(F("Could not add CTC characteristic"));
     return false;
   }
 
   /* Add the Heart Rate Service to the advertising data (needed for Nordic apps to detect the service) */
  // Serial.print(F("Adding Heart Rate Service UUID to the advertising payload: "));
  // ble.sendCommandCheckOK( F("AT+GAPSETADVDATA=02-01-06-05-02-0d-18-0a-18") );
+  if (!ble.sendCommandCheckOK(
+            F("AT+GAPSETADVDATA="
+              "02-01-06-"
+              "02-0a-00-"
+              "05-02-18-18-16-18"
+              ))) {
+    Serial.print(F("Could not set Advertising data?"));
+    return false;
+  }
 
   /* Reset the device for the new service setting changes to take effect */
   Serial.print(F("Performing a SW reset (service changes require a reset): "));
   ble.reset();
 
+  uint8_t data[2] = {0};
+  uint8_t base = 0;
+
+  uint16_t featureFlags = 0x0003;
+  APPEND_BUFFER(data, base, featureFlags);
+  BLEsetChar(ble, cscFeatureId, data, base);
+
+  base = 0;
+  uint8_t locationFlags = 0x03;
+  APPEND_BUFFER(data, base, locationFlags);
+  BLEsetChar(ble, cscLocationId, data, base);
+
   Serial.println();
+
+  return true;
+}
+
+uint32_t lastRevs = 0;
+
+void writeBluetooth(long time, float distance, float power) {
+
+  uint8_t data[11] = {0};
+  uint8_t base = 0;
+
+  // Need to transform velocity into wheel revolutions of an imaginary bike
+  // Assume wheel has c = 2.340 m
+  // Distance since last call
+  const uint32_t c = 2340;
+  uint32_t nRevs = (distance * 1000) / c; 
+
+  if ((blueToothSetup) && (nRevs > lastRevs)) {
+    float aveSpeed = (time > 0) ? (distance * 1.0e6) / time : 0;
+    float timeToLastRev = (nRevs * c) / aveSpeed; // in s
+    // Convert to 1/1024 s units
+    uint16_t lastWheelEvent = (uint16_t) (timeToLastRev * 1024);
+
+    Serial.print("Sending BLE CSC: nRevs: ");
+    Serial.print(nRevs, 1);
+    Serial.print(" timeToLastRev: ");
+    Serial.print(timeToLastRev);
+    Serial.print( " s ");
+    Serial.print(lastWheelEvent);
+    Serial.println( " 1/1024 s");
+
+    uint8_t flags = 0x03;
+    uint16_t crankRevs = 0x0000;
+    uint16_t lastCrankEvent = 0x0000;
+
+    APPEND_BUFFER(data, base, flags);
+    APPEND_BUFFER(data, base, nRevs);
+    APPEND_BUFFER(data, base, lastWheelEvent);
+    APPEND_BUFFER(data, base, crankRevs);
+    APPEND_BUFFER(data, base, lastCrankEvent);
+
+    BLEsetChar(ble, cscMeasureId, data, base);
+    lastRevs = nRevs;
+  }
+
 }
 
 void setup() {
@@ -173,7 +253,7 @@ void setup() {
 
 void writeNumberToBarChart(float num) {
   // Maximum number for the input
-  const float maxNum = 1.0;
+  const float maxNum = 2.0;
   // Maximum number of LEDs
   const int ledNum = 24;
   // LED boundaries
@@ -247,7 +327,7 @@ void loop() {
   long deltaT = millis() - lastMeasure;
   if (deltaT > 100) {
     lastMeasure = millis();
-    float force = scale.get_units();
+    float force = simulate ? random(50, 150) : scale.get_units();
 
     // Force = 0.5 * rho * v^2 * C_D * A
     // v = K * sqrt(F)
@@ -287,6 +367,8 @@ void loop() {
     displayTime(time);
 
     writeNumberToBarChart(velocity);
+
+    writeBluetooth(time, distance, power);
 
     Serial.print("Force: ");
     Serial.print(force, 1);
