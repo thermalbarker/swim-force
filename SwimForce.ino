@@ -74,6 +74,11 @@ int32_t cscMeasureId;
 int32_t cscLocationId;
 int32_t cscControlPointId;
 
+int32_t pwrServiceId;
+int32_t pwrFeatureId;
+int32_t pwrMeasureId;
+int32_t pwrLocationId;
+
 bool BLEsetChar(Adafruit_BLE& ada_ble, uint8_t charID, uint8_t const data[], uint8_t size)
 {
   uint16_t argtype[] = { AT_ARGTYPE_UINT8, (uint16_t) (AT_ARGTYPE_BYTEARRAY+ size) };
@@ -146,9 +151,30 @@ bool setupBluetooth() {
     return false;
   }
 
-  /* Add the Heart Rate Service to the advertising data (needed for Nordic apps to detect the service) */
- // Serial.print(F("Adding Heart Rate Service UUID to the advertising payload: "));
- // ble.sendCommandCheckOK( F("AT+GAPSETADVDATA=02-01-06-05-02-0d-18-0a-18") );
+   Serial.println(F("Adding the Cycling Power Service (UUID = 0x1818): "));
+  if (!ble.sendCommandWithIntReply( F("AT+GATTADDSERVICE=UUID=0x1818"), &pwrServiceId)) {
+    Serial.println(F("Could not add HRM service"));
+    return false;
+  }
+
+  Serial.println(F("Adding the power characteristic (UUID = 0x2A65): "));
+  if (!ble.sendCommandWithIntReply( F("AT+GATTADDCHAR=UUID=0x2A65, PROPERTIES=0x02, MIN_LEN=4, MAX_LEN=4, VALUE=0"), &pwrFeatureId)) {
+    Serial.println(F("Could not add CTC characteristic"));
+    return false;
+  }
+
+  Serial.println(F("Adding the power measurement characteristic (UUID = 0x2A63): "));
+  if (!ble.sendCommandWithIntReply( F("AT+GATTADDCHAR=UUID=0x2A63, PROPERTIES=0x12, MIN_LEN=4, MAX_LEN=14, VALUE=00-00-00-00-00-00"), &pwrMeasureId)) {
+    Serial.println(F("Could not add CTC characteristic"));
+    return false;
+  }
+
+  Serial.println(F("Adding the power Location (UUID = 0x2A5D): "));
+  if (!ble.sendCommandWithIntReply( F("AT+GATTADDCHAR=UUID=0x2A5D, PROPERTIES=0x02, MIN_LEN=1, MAX_LEN=1, VALUE=0"), &pwrLocationId)) {
+    Serial.println(F("Could not add CTC characteristic"));
+    return false;
+  }
+
   if (!ble.sendCommandCheckOK(
             F("AT+GAPSETADVDATA="
               "02-01-06-"
@@ -174,6 +200,16 @@ bool setupBluetooth() {
   uint8_t locationFlags = 0x03;
   APPEND_BUFFER(data, base, locationFlags);
   BLEsetChar(ble, cscLocationId, data, base);
+
+  base = 0;
+  APPEND_BUFFER(data, base, locationFlags);
+  BLEsetChar(ble, pwrLocationId, data, base);
+
+  base = 0;
+  // Set bits 2,3,7 (rev data + accumulated energy)
+  uint32_t powerFeatureFlags = 0x0000008C;
+  APPEND_BUFFER(data, base, locationFlags);
+  BLEsetChar(ble, pwrFeatureId, data, base);
 
   Serial.println();
 
@@ -218,6 +254,27 @@ void writeBluetooth(long time, float distance, float power) {
     APPEND_BUFFER(data, base, lastCrankEvent);
 
     BLEsetChar(ble, cscMeasureId, data, base);
+
+    // Now add power measurement
+    base = 0;
+    // flags 4,5,11 (revs + accumulated energy)
+    // TODO: Check endianness
+    uint16_t pwrFlags = 0x0830;
+    APPEND_BUFFER(data, base, pwrFlags); // 16
+    // Instantaneous power
+    int16_t pwrInt = (int16_t) power;
+    APPEND_BUFFER(data, base, pwrInt); // 16
+    // Wheel revs
+    APPEND_BUFFER(data, base, nRevs); // 32
+    // Wheel time
+    uint16_t lastWheelEventPwr = (uint16_t) (timeToLastRev * 2048);
+    APPEND_BUFFER(data, base, lastWheelEventPwr); // 16
+    // Crank revs
+    APPEND_BUFFER(data, base, crankRevs); // 16
+    APPEND_BUFFER(data, base, lastCrankEvent); // 16
+
+    BLEsetChar(ble, pwrMeasureId, data, base);
+
     lastRevs = nRevs;
   }
 
@@ -319,6 +376,7 @@ void loop() {
     distance = 0;
     time = 0;
     lastDisplay = 0;
+    lastRevs = 0;
     scale.tare(); //Reset the scale to 0
   } else {
     digitalWrite(buttonLED, LOW);
