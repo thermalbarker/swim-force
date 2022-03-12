@@ -21,6 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
+#include <Arduino.h>
 #include "HX711.h"
 #include <Wire.h> // Enable this line if using Arduino Uno, Mega, etc.
 #include <Adafruit_GFX.h>
@@ -49,7 +50,9 @@ const int buttonPin = 5;
 float calibration_factor = 2219; // Should be Newtons
 
 float distance = 0.0;
-long time = 0;
+float energy = 0.0;
+long movingTime = 0;
+long totalTime = 0;
 
 long lastTime = 0;
 long lastMeasure = 0;
@@ -179,6 +182,7 @@ bool setupBluetooth() {
             F("AT+GAPSETADVDATA="
               "02-01-06-"
               "02-0a-00-"
+              "11-06-9e-ca-dc-24-0e-e5-a9-e0-93-f3-a3-b5-01-00-40-6e-"
               "05-02-18-18-16-18"
               ))) {
     Serial.print(F("Could not set Advertising data?"));
@@ -207,8 +211,9 @@ bool setupBluetooth() {
 
   base = 0;
   // Set bits 2,3,7 (rev data + accumulated energy)
-  uint32_t powerFeatureFlags = 0x0000008C;
-  APPEND_BUFFER(data, base, locationFlags);
+  // Just do accumulated energy (bit 7)
+  uint32_t powerFeatureFlags = 0x00000080;
+  APPEND_BUFFER(data, base, powerFeatureFlags);
   BLEsetChar(ble, pwrFeatureId, data, base);
 
   Serial.println();
@@ -218,7 +223,7 @@ bool setupBluetooth() {
 
 uint32_t lastRevs = 0;
 
-void writeBluetooth(long time, float distance, float power) {
+void writeBluetooth(long time, float distance, float power, float energy) {
 
   uint8_t data[11] = {0};
   uint8_t base = 0;
@@ -259,19 +264,14 @@ void writeBluetooth(long time, float distance, float power) {
     base = 0;
     // flags 4,5,11 (revs + accumulated energy)
     // TODO: Check endianness
-    uint16_t pwrFlags = 0x0830;
+    uint16_t pwrFlags = 0x0800;
     APPEND_BUFFER(data, base, pwrFlags); // 16
-    // Instantaneous power
+    // Instantaneous power in W
     int16_t pwrInt = (int16_t) power;
     APPEND_BUFFER(data, base, pwrInt); // 16
-    // Wheel revs
-    APPEND_BUFFER(data, base, nRevs); // 32
-    // Wheel time
-    uint16_t lastWheelEventPwr = (uint16_t) (timeToLastRev * 2048);
-    APPEND_BUFFER(data, base, lastWheelEventPwr); // 16
-    // Crank revs
-    APPEND_BUFFER(data, base, crankRevs); // 16
-    APPEND_BUFFER(data, base, lastCrankEvent); // 16
+    // Accumulated power (kJ)
+    uint16_t eInt = (uint16_t) energy;
+    APPEND_BUFFER(data, base, eInt); // 16
 
     BLEsetChar(ble, pwrMeasureId, data, base);
 
@@ -291,21 +291,39 @@ void setup() {
   matrix2.begin(0x71);
   bar.begin(0x72);
 
-  matrix.print("Swim");
-  matrix2.print("Force");
+  matrix2.print("Swim");
+  matrix.print("Force");
   matrix.writeDisplay();
   matrix2.writeDisplay();
 
   pinMode(powerLED, OUTPUT);
   pinMode(buttonLED, OUTPUT);
   pinMode(boardLED, OUTPUT);
-
   // initialize the pushbutton pin as an input:
   pinMode(buttonPin, INPUT);
 
   blueToothSetup = setupBluetooth();
 
-  delay(5000);
+  testDisplays();
+}
+
+void testDisplays() {
+
+  digitalWrite(powerLED, HIGH);
+  digitalWrite(buttonLED, HIGH);
+
+  for (int i = 1; i < 200; i++) {
+    writeNumberToBarChart(((float) i) / 100);
+    delay(10);
+  }
+  for (int i = 200; i >= 0; i--) {
+    writeNumberToBarChart(((float) i) / 100);
+    delay(10);
+  }
+
+  digitalWrite(powerLED, LOW);
+  digitalWrite(buttonLED, LOW);
+
 }
 
 void writeNumberToBarChart(float num) {
@@ -365,6 +383,11 @@ void displayTime(long millis) {
     matrix2.writeDisplay();
 }
 
+float simulateForce(long t) {
+    // Make a sinusoidal simulated force on top of a constant with some noise
+    return 10.0 * sin(2.0 * 3.14159 * ((float)t / 1000.0)) + 70.0 + random(0, 5);
+}
+
 void loop() {
 
   // read the state of the pushbutton value:
@@ -374,7 +397,8 @@ void loop() {
   if (buttonState == HIGH) {
     digitalWrite(buttonLED, HIGH);
     distance = 0;
-    time = 0;
+    movingTime = 0;
+    energy = 0;
     lastDisplay = 0;
     lastRevs = 0;
     scale.tare(); //Reset the scale to 0
@@ -385,7 +409,8 @@ void loop() {
   long deltaT = millis() - lastMeasure;
   if (deltaT > 100) {
     lastMeasure = millis();
-    float force = simulate ? random(50, 150) : scale.get_units();
+    totalTime += deltaT;
+    float force = simulate ? simulateForce(totalTime) : scale.get_units(); // Newtons
 
     // Force = 0.5 * rho * v^2 * C_D * A
     // v = K * sqrt(F)
@@ -405,15 +430,18 @@ void loop() {
     // Only measure if the force is positive
     // to avoid negative velocities
     if (force > 0.0) {
-        velocity = 0.1416 * sqrt(force);
+        velocity = 0.1416 * sqrt(force); // ms-1
     }
-    float deltaD = velocity * deltaT * 1e-3;
-    float power = velocity * force;
+    float deltaD = velocity * deltaT * 1e-3; // m
+    float power = velocity * force; // W
+    if (power > 0.0) {
+      energy += power * deltaT * 1e-6; // kJ
+    }
 
     // Add a threshold for moving
     if (velocity > 0.1) {
       distance += deltaD; 
-      time += deltaT;
+      movingTime += deltaT;
       digitalWrite(boardLED, HIGH);
     } else {
       digitalWrite(boardLED, LOW);
@@ -422,11 +450,11 @@ void loop() {
     matrix.print(distance);
     matrix.writeDisplay();
 
-    displayTime(time);
+    displayTime(movingTime);
 
     writeNumberToBarChart(velocity);
 
-    writeBluetooth(time, distance, power);
+    writeBluetooth(movingTime, distance, power, energy);
 
     Serial.print("Force: ");
     Serial.print(force, 1);
