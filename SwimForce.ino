@@ -450,7 +450,9 @@ bool computeStrokeRate(float forceNow, float &aveForce) {
   // The force from the last update
   float lastForce = getForceAt();
   aveForce = updateMovingAverage(forceNow);
-  bool stroke = ((lastForce > aveForce) && (forceNow < aveForce));
+  // Zero crossing increase
+  bool increase = ((lastForce < aveForce) && (forceNow > aveForce));
+  bool decrease = ((lastForce > aveForce) && (forceNow < aveForce));
   
 #ifdef DEBUG
   Serial.print("ForceNow: ");
@@ -465,17 +467,12 @@ bool computeStrokeRate(float forceNow, float &aveForce) {
 #endif
 
   // This is the equivalent of zero crossing
-  if (stroke) {
-    // Invert LED
-    if (digitalRead(boardLED) == LOW) {
-      digitalWrite(boardLED, HIGH);
-    } else {
-      digitalWrite(boardLED, LOW);
-    }
-    return true;
-  } else {
-    return false;
+  if (increase) {
+    digitalWrite(boardLED, HIGH);
+  } else if (decrease) {
+    digitalWrite(boardLED, LOW);
   }
+  return increase;
 }
 
 void loop() {
@@ -507,7 +504,7 @@ void loop() {
 #ifndef SIMULATE
     float force = scale.get_units(); // Newtons
 #else
-    float force = simulateForce(totalTime) :
+    float force = simulateForce(totalTime);
 #endif
     // Force = 0.5 * rho * v^2 * C_D * A
     // v = K * sqrt(F)
