@@ -30,6 +30,8 @@
 #include <Adafruit_BluefruitLE_SPI.h>
 #include "src/BluefruitConfig/BluefruitConfig.h"
 
+//#define DEBUG
+
 #define APPEND_BUFFER(buffer,base,field) \
     memcpy(buffer+base,&field,sizeof(field)); \
     base += sizeof(field);
@@ -57,7 +59,7 @@ long totalTime = 0;
 long lastTime = 0;
 long lastMeasure = 0;
 
-bool simulate = false;
+bool simulate = true;
 
 /* ...hardware SPI, using SCK/MOSI/MISO hardware SPI pins and then user selected CS/IRQ/RST */
 Adafruit_BluefruitLE_SPI ble(BLUEFRUIT_SPI_CS, BLUEFRUIT_SPI_IRQ, BLUEFRUIT_SPI_RST);
@@ -222,8 +224,11 @@ bool setupBluetooth() {
 }
 
 uint32_t lastRevs = 0;
+float timeToLastRev = 0.0;
+uint16_t nPedalRevs = 0;
+long lastCrankEvent = 0; // in ms
 
-void writeBluetooth(long time, float distance, float power, float energy) {
+void writeBluetooth(long time, float distance, float power, float energy, bool stroke) {
 
   uint8_t data[11] = {0};
   uint8_t base = 0;
@@ -234,29 +239,46 @@ void writeBluetooth(long time, float distance, float power, float energy) {
   const uint32_t c = 2340;
   uint32_t nRevs = (distance * 1000) / c; 
 
-  if ((blueToothSetup) && (nRevs > lastRevs)) {
+  if (nRevs > lastRevs) {
     float aveSpeed = (time > 0) ? (distance * 1.0e6) / time : 0;
-    float timeToLastRev = (nRevs * c) / aveSpeed; // in s
+    timeToLastRev = (nRevs * c) / aveSpeed; // in s
+  }
+
+  if (stroke) {
+    nPedalRevs++;
+    lastCrankEvent = time;
+  }
+
+  if (((blueToothSetup) && (nRevs > lastRevs)) || stroke) {
+
     // Convert to 1/1024 s units
     uint16_t lastWheelEvent = (uint16_t) (timeToLastRev * 1024);
+    uint16_t crankTimeForBle = (uint16_t) (lastCrankEvent * 128 / 125);
 
+#ifdef DEBUG
     Serial.print("Sending BLE CSC: nRevs: ");
     Serial.print(nRevs, 1);
     Serial.print(" timeToLastRev: ");
     Serial.print(timeToLastRev);
     Serial.print( " s ");
     Serial.print(lastWheelEvent);
+    Serial.print( " 1/1024 s");
+    Serial.print(" nCrankRevs: ");
+    Serial.print(nPedalRevs);
+    Serial.print(" timeToLastCrankRev: ");
+    Serial.print(lastCrankEvent);
+    Serial.print( " s ");
+    Serial.print(crankTimeForBle);
     Serial.println( " 1/1024 s");
+#endif
+    const uint8_t flags = 0x03;
 
-    uint8_t flags = 0x03;
-    uint16_t crankRevs = 0x0000;
-    uint16_t lastCrankEvent = 0x0000;
 
     APPEND_BUFFER(data, base, flags);
     APPEND_BUFFER(data, base, nRevs);
     APPEND_BUFFER(data, base, lastWheelEvent);
-    APPEND_BUFFER(data, base, crankRevs);
-    APPEND_BUFFER(data, base, lastCrankEvent);
+    APPEND_BUFFER(data, base, nPedalRevs);
+    APPEND_BUFFER(data, base, crankTimeForBle);
 
     BLEsetChar(ble, cscMeasureId, data, base);
 
@@ -283,9 +305,6 @@ void writeBluetooth(long time, float distance, float power, float energy) {
 void setup() {
   Serial.begin(9600);
   Serial.println("Swim Force");
-  scale.begin(DOUT, CLK);
-  scale.set_scale(calibration_factor);
-  scale.tare(); //Reset the scale to 0
 
   matrix.begin(0x70);
   matrix2.begin(0x71);
@@ -296,6 +315,10 @@ void setup() {
   matrix.writeDisplay();
   matrix2.writeDisplay();
 
+  scale.begin(DOUT, CLK);
+  scale.set_scale(calibration_factor);
+  scale.tare(); //Reset the scale to 0
+
   pinMode(powerLED, OUTPUT);
   pinMode(buttonLED, OUTPUT);
   pinMode(boardLED, OUTPUT);
@@ -304,7 +327,11 @@ void setup() {
 
   blueToothSetup = setupBluetooth();
 
+  resetStrokeRate();
+
   testDisplays();
+  // Reset the time
+  lastMeasure = millis();
 }
 
 void testDisplays() {
@@ -385,7 +412,73 @@ void displayTime(long millis) {
 
 float simulateForce(long t) {
     // Make a sinusoidal simulated force on top of a constant with some noise
-    return 10.0 * sin(2.0 * 3.14159 * ((float)t / 1000.0)) + 70.0 + random(0, 5);
+    return 30.0 * sin(2.0 * 3.14159 * ((float)t / 500.0)) + 70.0 + random(0, 1);
+}
+
+/// Functions and variables for computing stroke rate
+const int maxAveragePoints = 30; // corresponds to 3 seconds
+float forceHistory[maxAveragePoints];
+int lastPoint = 0;
+
+void resetStrokeRate() {
+  for (int i = 0; i < maxAveragePoints; i++) {
+    forceHistory[i] = 0;
+  }
+  lastPoint = 0;
+}
+
+float getForceAt(int i = -1) {
+  i = lastPoint + i;
+  if (i < 0) {
+    i = maxAveragePoints + i;
+  }
+  return forceHistory[i];
+}
+
+float updateMovingAverage(float forceNow) {
+  forceHistory[lastPoint] = forceNow;
+  lastPoint++;
+  if (lastPoint >= maxAveragePoints) {
+    lastPoint = 0;
+  }
+  float average = 0.0;
+  for (int i = 0; i < maxAveragePoints; i++) {
+    average += forceHistory[i];
+  }
+  average /= (float) maxAveragePoints; 
+  return average;
+}
+
+bool computeStrokeRate(float forceNow, float &aveForce) {
+  // The force from the last update
+  float lastForce = getForceAt();
+  aveForce = updateMovingAverage(forceNow);
+  bool stroke = ((lastForce > aveForce) && (forceNow < aveForce));
+  
+#ifdef DEBUG
+  Serial.print("ForceNow: ");
+  Serial.print(forceNow, 2);
+  Serial.print(" lastForce: ");
+  Serial.print(lastForce, 2);
+  Serial.print(" average: ");
+  Serial.print(aveForce);
+  Serial.print(" stroke: ");
+  Serial.print(stroke);
+  Serial.println();
+#endif
+
+  // This is the equivalent of zero crossing
+  if (stroke) {
+    // Invert LED
+    if (digitalRead(boardLED) == LOW) {
+      digitalWrite(boardLED, HIGH);
+    } else {
+      digitalWrite(boardLED, LOW);
+    }
+    return true;
+  } else {
+    return false;
+  }
 }
 
 void loop() {
@@ -401,7 +494,11 @@ void loop() {
     energy = 0;
     lastDisplay = 0;
     lastRevs = 0;
+    timeToLastRev = 0.0;
+    nPedalRevs = 0;
+    lastCrankEvent = 0;
     scale.tare(); //Reset the scale to 0
+    resetStrokeRate();
   } else {
     digitalWrite(buttonLED, LOW);
   }
@@ -442,10 +539,10 @@ void loop() {
     if (velocity > 0.1) {
       distance += deltaD; 
       movingTime += deltaT;
-      digitalWrite(boardLED, HIGH);
-    } else {
-      digitalWrite(boardLED, LOW);
     }
+
+    float aveForce = force;
+    bool stroke = computeStrokeRate(force, aveForce);
 
     matrix.print(distance);
     matrix.writeDisplay();
@@ -454,8 +551,9 @@ void loop() {
 
     writeNumberToBarChart(velocity);
 
-    writeBluetooth(movingTime, distance, power, energy);
+    writeBluetooth(movingTime, distance, power, energy, stroke);
 
+#ifdef DEBUG
     Serial.print("Force: ");
     Serial.print(force, 1);
     Serial.print(" Velocity: ");
@@ -467,6 +565,7 @@ void loop() {
     Serial.print(" distance: ");
     Serial.print(distance, 1);
     Serial.println();
+#endif
   }
 
   //Each second blink the status LED
