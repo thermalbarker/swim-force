@@ -31,6 +31,7 @@
 #include "src/BluefruitConfig/BluefruitConfig.h"
 
 //#define DEBUG
+//#define SIMULATE
 
 #define APPEND_BUFFER(buffer,base,field) \
     memcpy(buffer+base,&field,sizeof(field)); \
@@ -58,8 +59,6 @@ long totalTime = 0;
 
 long lastTime = 0;
 long lastMeasure = 0;
-
-bool simulate = true;
 
 /* ...hardware SPI, using SCK/MOSI/MISO hardware SPI pins and then user selected CS/IRQ/RST */
 Adafruit_BluefruitLE_SPI ble(BLUEFRUIT_SPI_CS, BLUEFRUIT_SPI_IRQ, BLUEFRUIT_SPI_RST);
@@ -410,10 +409,12 @@ void displayTime(long millis) {
     matrix2.writeDisplay();
 }
 
+#ifdef SIMULATE
 float simulateForce(long t) {
     // Make a sinusoidal simulated force on top of a constant with some noise
     return 30.0 * sin(2.0 * 3.14159 * ((float)t / 500.0)) + 70.0 + random(0, 1);
 }
+#endif
 
 /// Functions and variables for computing stroke rate
 const int maxAveragePoints = 30; // corresponds to 3 seconds
@@ -507,8 +508,11 @@ void loop() {
   if (deltaT > 100) {
     lastMeasure = millis();
     totalTime += deltaT;
-    float force = simulate ? simulateForce(totalTime) : scale.get_units(); // Newtons
-
+#ifndef SIMULATE
+    float force = scale.get_units(); // Newtons
+#else
+    float force = simulateForce(totalTime) :
+#endif
     // Force = 0.5 * rho * v^2 * C_D * A
     // v = K * sqrt(F)
     // K = sqrt(2/(rho * C_D * A))
