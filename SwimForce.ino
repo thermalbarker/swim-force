@@ -335,21 +335,17 @@ void setup() {
 
 void testDisplays() {
 
-  digitalWrite(powerLED, HIGH);
-  digitalWrite(buttonLED, HIGH);
-
   for (int i = 1; i < 200; i++) {
     writeNumberToBarChart(((float) i) / 100);
+    if (i % 50 == 0) {
+      digitalWrite(powerLED, HIGH);
+      digitalWrite(buttonLED, LOW);
+    } else {
+      digitalWrite(powerLED, LOW);
+      digitalWrite(buttonLED, HIGH);
+    }
     delay(10);
   }
-  for (int i = 200; i >= 0; i--) {
-    writeNumberToBarChart(((float) i) / 100);
-    delay(10);
-  }
-
-  digitalWrite(powerLED, LOW);
-  digitalWrite(buttonLED, LOW);
-
 }
 
 void writeNumberToBarChart(float num) {
@@ -540,22 +536,21 @@ void loop() {
     }
 
     // Add a threshold for moving
+    bool stroke = false;
     if (velocity > 0.1) {
       distance += deltaD; 
       movingTime += deltaT;
-    }
 
-    float aveForce = force;
-    bool stroke = computeStrokeRate(force, aveForce);
+      float aveForce = force;
+      bool stroke = computeStrokeRate(force, aveForce);
+      writeBluetooth(movingTime, distance, power, energy, stroke);
+    }
 
     matrix.print(distance);
     matrix.writeDisplay();
-
     displayTime(movingTime);
 
     writeNumberToBarChart(velocity);
-
-    writeBluetooth(movingTime, distance, power, energy, stroke);
 
 #ifdef DEBUG
     Serial.print("Force: ");
