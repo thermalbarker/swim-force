@@ -527,7 +527,32 @@ void loop() {
         velocity = 0.1416 * sqrt(force); // ms-1
     }
     float deltaD = velocity * deltaT * 1e-3; // m
+
+    // This power is just the power to overcome the drag force
     float power = velocity * force; // W
+    // According to:
+    // Here: https://www.researchgate.net/publication/8031134_An_energy_balance_of_front_crawl
+    // and https://www.semanticscholar.org/paper/The-Power-Output-and-Sprinting-Performance-of-Young-Barbosa-Morais/2c45d0f13597c86fda47c689f72ea68a900e5b20
+    // The power is made of two components:
+    //
+    // P_ext = P_drag + P_kinetic
+    //
+    // ie the total power transfered externally is the sum of
+    // power to overcome drag + power transfered to kinetic energy in water
+    //
+    // P_ext = P_drag / nu_froude
+    //
+    // Where nu_froude is the Froude number, which is the ratio of swimming velocity
+    // To limb velocity, and can be estimated as:
+    //
+    // nu_froude = (v * 0.9) / (2 * PI * rate * l) * 2 / PI
+    //
+    // Where rate is the stroke rate, and l is the arm length
+    //
+    // If P_drag = v * F, then we get:
+    //
+    // P_ext = F * 0.9 * PI**2 * rate * l
+    
     if (power > 0.0) {
       energy += power * deltaT * 1e-6; // kJ
     }
