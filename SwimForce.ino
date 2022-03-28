@@ -408,7 +408,7 @@ void displayTime(long millis) {
 #ifdef SIMULATE
 float simulateForce(long t) {
     // Make a sinusoidal simulated force on top of a constant with some noise
-    return 30.0 * sin(2.0 * 3.14159 * ((float)t / 500.0)) + 70.0 + random(0, 1);
+    return 10.0 * sin(2.0 * 3.14159 * ((float)t / 2000.0)) + 60.0 + random(0, 1);
 }
 #endif
 
@@ -446,7 +446,7 @@ float updateMovingAverage(float forceNow) {
   return average;
 }
 
-bool computeStrokeRate(float forceNow, float &aveForce) {
+bool isNewStroke(float forceNow, float &aveForce) {
   // The force from the last update
   float lastForce = getForceAt();
   aveForce = updateMovingAverage(forceNow);
@@ -473,6 +473,30 @@ bool computeStrokeRate(float forceNow, float &aveForce) {
     digitalWrite(boardLED, LOW);
   }
   return increase;
+}
+
+const int maxStrokeAvePoints = 10;
+// These are the timestamps at which each stroke occurred
+int strokeTimes[maxStrokeAvePoints];
+int lastPointSR = 0;
+
+float computeAverageStrokeRate(bool isNewStroke, int movingTime) {
+  if (isNewStroke) {
+    strokeTimes[lastPointSR] = movingTime;
+    lastPointSR++;
+    if (lastPointSR >= maxStrokeAvePoints) {
+      lastPointSR = 0;
+    }
+  }
+
+  // Compute most recent reading
+  int latestTimeIndex = (lastPointSR == 0) ? maxStrokeAvePoints - 1 : lastPointSR - 1;
+  int latestTime = strokeTimes[latestTimeIndex];
+
+  // Just take the current time minus the earliest time
+  int deltaT = latestTime - strokeTimes[lastPointSR]; // in ms
+
+  return 1000.0 * ((float) (maxStrokeAvePoints - 1) / (float) deltaT); // in per second
 }
 
 void loop() {
@@ -528,8 +552,6 @@ void loop() {
     }
     float deltaD = velocity * deltaT * 1e-3; // m
 
-    // This power is just the power to overcome the drag force
-    float power = velocity * force; // W
     // According to:
     // Here: https://www.researchgate.net/publication/8031134_An_energy_balance_of_front_crawl
     // and https://www.semanticscholar.org/paper/The-Power-Output-and-Sprinting-Performance-of-Young-Barbosa-Morais/2c45d0f13597c86fda47c689f72ea68a900e5b20
@@ -551,11 +573,10 @@ void loop() {
     //
     // If P_drag = v * F, then we get:
     //
-    // P_ext = F * 0.9 * PI**2 * rate * l
-    
-    if (power > 0.0) {
-      energy += power * deltaT * 1e-6; // kJ
-    }
+    // P_ext = (PI**2 / 0.9) F * rate * l
+    static const float zeroNinePiSquared = 10.9662271;
+    // Arm length
+    static const float armLength = 0.8; // m
 
     // Add a threshold for moving
     bool stroke = false;
@@ -564,12 +585,29 @@ void loop() {
       movingTime += deltaT;
 
       float aveForce = force;
-      bool stroke = computeStrokeRate(force, aveForce);
+      // Flags whether this time sample looks like a new stroke
+      bool stroke = isNewStroke(force, aveForce);
+      float averageStrokeRate = computeAverageStrokeRate(stroke, movingTime);
+
+      // This power is just the power to overcome the drag force
+      // float power = velocity * force; // W
+
+      // Compute total power:
+      float power = force * zeroNinePiSquared * averageStrokeRate * armLength; // W
+
+      matrix.print(power);
+      matrix.writeDisplay();
+
+      if (power > 0.0) {
+        energy += power * deltaT * 1e-6; // kJ
+      }
+
       writeBluetooth(movingTime, distance, power, energy, stroke);
     }
 
-    matrix.print(distance);
-    matrix.writeDisplay();
+    //matrix.print(distance);
+    //matrix.writeDisplay();
+
     displayTime(movingTime);
 
     writeNumberToBarChart(velocity);
