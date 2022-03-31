@@ -31,7 +31,7 @@
 #include "src/BluefruitConfig/BluefruitConfig.h"
 
 //#define DEBUG
-//#define SIMULATE
+#define SIMULATE
 
 #define APPEND_BUFFER(buffer,base,field) \
     memcpy(buffer+base,&field,sizeof(field)); \
@@ -46,6 +46,7 @@ HX711 scale;
 
 Adafruit_7segment matrix = Adafruit_7segment();
 Adafruit_7segment matrix2 = Adafruit_7segment();
+Adafruit_AlphaNum4 alpha = Adafruit_AlphaNum4();
 Adafruit_24bargraph bar = Adafruit_24bargraph();
 
 const int buttonPin = 5;
@@ -301,38 +302,6 @@ void writeBluetooth(long time, float distance, float power, float energy, bool s
 
 }
 
-void setup() {
-  Serial.begin(9600);
-  Serial.println("Swim Force");
-
-  matrix.begin(0x70);
-  matrix2.begin(0x71);
-  bar.begin(0x72);
-
-  matrix2.print("Swim");
-  matrix.print("Force");
-  matrix.writeDisplay();
-  matrix2.writeDisplay();
-
-  scale.begin(DOUT, CLK);
-  scale.set_scale(calibration_factor);
-  scale.tare(); //Reset the scale to 0
-
-  pinMode(powerLED, OUTPUT);
-  pinMode(buttonLED, OUTPUT);
-  pinMode(boardLED, OUTPUT);
-  // initialize the pushbutton pin as an input:
-  pinMode(buttonPin, INPUT);
-
-  blueToothSetup = setupBluetooth();
-
-  resetStrokeRate();
-
-  testDisplays();
-  // Reset the time
-  lastMeasure = millis();
-}
-
 void testDisplays() {
 
   for (int i = 1; i < 200; i++) {
@@ -380,7 +349,6 @@ void writeNumberToBarChart(float num) {
 long lastDisplay = 0;
 
 void displayTime(long millis) {
-
     long minutes = millis / 60000;
     long seconds = (millis / 1000) - (minutes * 60);
     long displayNum = minutes * 100 + seconds;
@@ -405,10 +373,25 @@ void displayTime(long millis) {
     matrix2.writeDisplay();
 }
 
+void displayNumber(Adafruit_AlphaNum4 &dis, float num) {
+  int thousands = num / 1000;
+  int hundreds = (num - (1000 * thousands)) / 100;
+  int tens = (num - (1000 * thousands) - (100 * hundreds)) / 10;
+  int ones = num - (1000 * thousands) - (100 * hundreds) - (10 * tens);
+
+  // 48 is the ascii code for '0'
+  dis.writeDigitAscii(0, thousands + 48);
+  dis.writeDigitAscii(1, hundreds + 48);
+  dis.writeDigitAscii(2, tens + 48);
+  dis.writeDigitAscii(3, ones + 48);
+
+  dis.writeDisplay();
+}
+
 #ifdef SIMULATE
 float simulateForce(long t) {
     // Make a sinusoidal simulated force on top of a constant with some noise
-    return 10.0 * sin(2.0 * 3.14159 * ((float)t / 2000.0)) + 60.0 + random(0, 1);
+    return 5.0 * sin(2.0 * 3.14159 * ((float)t / 2000.0)) + 50.0 + random(0, 1);
 }
 #endif
 
@@ -480,7 +463,15 @@ const int maxStrokeAvePoints = 10;
 int strokeTimes[maxStrokeAvePoints];
 int lastPointSR = 0;
 
+void resetAverageStrokeRate() {
+  for (int i = 0; i < maxStrokeAvePoints; i++) {
+    strokeTimes[i] = 0;
+  }
+  lastPointSR = 0;
+}
+
 float computeAverageStrokeRate(bool isNewStroke, int movingTime) {
+
   if (isNewStroke) {
     strokeTimes[lastPointSR] = movingTime;
     lastPointSR++;
@@ -497,6 +488,40 @@ float computeAverageStrokeRate(bool isNewStroke, int movingTime) {
   int deltaT = latestTime - strokeTimes[lastPointSR]; // in ms
 
   return 1000.0 * ((float) (maxStrokeAvePoints - 1) / (float) deltaT); // in per second
+}
+
+void setup() {
+  Serial.begin(9600);
+  Serial.println("Swim Force");
+
+  matrix.begin(0x70);
+  matrix2.begin(0x71);
+  bar.begin(0x72);
+  alpha.begin(0x73);
+
+  matrix2.print("Swim");
+  matrix.print("Force");
+  matrix.writeDisplay();
+  matrix2.writeDisplay();
+
+  scale.begin(DOUT, CLK);
+  scale.set_scale(calibration_factor);
+  scale.tare(); //Reset the scale to 0
+
+  pinMode(powerLED, OUTPUT);
+  pinMode(buttonLED, OUTPUT);
+  pinMode(boardLED, OUTPUT);
+  // initialize the pushbutton pin as an input:
+  pinMode(buttonPin, INPUT);
+
+  blueToothSetup = setupBluetooth();
+
+  resetStrokeRate();
+  resetAverageStrokeRate();
+
+  testDisplays();
+  // Reset the time
+  lastMeasure = millis();
 }
 
 void loop() {
@@ -517,6 +542,7 @@ void loop() {
     lastCrankEvent = 0;
     scale.tare(); //Reset the scale to 0
     resetStrokeRate();
+    resetAverageStrokeRate();
   } else {
     digitalWrite(buttonLED, LOW);
   }
@@ -595,6 +621,8 @@ void loop() {
       // Compute total power:
       float power = force * zeroNinePiSquared * averageStrokeRate * armLength; // W
 
+      displayNumber(alpha, power);
+
       matrix.print(power);
       matrix.writeDisplay();
 
@@ -605,8 +633,8 @@ void loop() {
       writeBluetooth(movingTime, distance, power, energy, stroke);
     }
 
-    //matrix.print(distance);
-    //matrix.writeDisplay();
+//    matrix.print(distance);
+//    matrix.writeDisplay();
 
     displayTime(movingTime);
 
