@@ -400,19 +400,30 @@ void displayTime(unsigned long millis) {
     matrix2.writeDisplay();
 }
 
-void displayNumber(Adafruit_AlphaNum4 &dis, float num) {
+void displayNumber(Adafruit_AlphaNum4 &dis, float num, int shift) {
   int thousands = num / 1000;
   int hundreds = (num - (1000 * thousands)) / 100;
   int tens = (num - (1000 * thousands) - (100 * hundreds)) / 10;
   int ones = num - (1000 * thousands) - (100 * hundreds) - (10 * tens);
 
   // 48 is the ascii code for '0'
-  dis.writeDigitAscii(0, thousands + 48);
-  dis.writeDigitAscii(1, hundreds + 48);
-  dis.writeDigitAscii(2, tens + 48);
-  dis.writeDigitAscii(3, ones + 48);
+  dis.writeDigitAscii(0 + shift, thousands + 48);
+  dis.writeDigitAscii(1 + shift, hundreds + 48);
+  dis.writeDigitAscii(2 + shift, tens + 48);
+  dis.writeDigitAscii(3 + shift, ones + 48);
 
   dis.writeDisplay();
+}
+
+void displayPower(float power) {
+  alpha.writeDigitAscii(3, 'W');
+  displayNumber(alpha, power, -1);
+}
+
+void displayStroke(float strokeRate) {
+  alpha2.writeDigitAscii(2, 'p');
+  alpha2.writeDigitAscii(3, 'm');
+  displayNumber(alpha2, strokeRate * 60, -2);
 }
 
 #ifdef SIMULATE
@@ -756,8 +767,8 @@ void loop() {
       }
     
       // Update displays
-      displayNumber(alpha, power);
-      displayNumber(alpha2, averageStrokeRate * 60);
+      displayPower(power);
+      displayStroke(averageStrokeRate);
 
       //matrix.print(averageStrokeRate);
       //matrix.writeDisplay();
