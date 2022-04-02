@@ -47,6 +47,7 @@ HX711 scale;
 Adafruit_7segment matrix = Adafruit_7segment();
 Adafruit_7segment matrix2 = Adafruit_7segment();
 Adafruit_AlphaNum4 alpha = Adafruit_AlphaNum4();
+Adafruit_AlphaNum4 alpha2 = Adafruit_AlphaNum4();
 Adafruit_24bargraph bar = Adafruit_24bargraph();
 
 const int buttonPin = 5;
@@ -572,6 +573,7 @@ void setup() {
   matrix2.begin(0x71);
   bar.begin(0x72);
   alpha.begin(0x73);
+  alpha2.begin(0x74);
 
   writeNumberToBarChart(++setupStep, maxSetupSteps);
 
@@ -752,6 +754,7 @@ void loop() {
     
       // Update displays
       displayNumber(alpha, power);
+      displayNumber(alpha2, averageStrokeRate * 60);
 
       //matrix.print(averageStrokeRate);
       //matrix.writeDisplay();
