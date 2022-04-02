@@ -55,11 +55,14 @@ float calibration_factor = 2219; // Should be Newtons
 
 float distance = 0.0;
 float energy = 0.0;
-long movingTime = 0;
-long totalTime = 0;
+unsigned long movingTime = 0;
+unsigned long totalTime = 0;
 
-long lastTime = 0;
-long lastMeasure = 0;
+unsigned long lastTime = 0;
+unsigned long lastMeasure = 0;
+
+unsigned setupStep = 0;
+unsigned maxSetupSteps = 30;
 
 /* ...hardware SPI, using SCK/MOSI/MISO hardware SPI pins and then user selected CS/IRQ/RST */
 Adafruit_BluefruitLE_SPI ble(BLUEFRUIT_SPI_CS, BLUEFRUIT_SPI_IRQ, BLUEFRUIT_SPI_RST);
@@ -102,21 +105,24 @@ bool setupBluetooth() {
     return false;
   }
   Serial.println( F("OK!") );
-
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
+  
   /* Perform a factory reset to make sure everything is in a known state */
   Serial.println(F("Performing a factory reset: "));
   if (!ble.factoryReset() ){
        Serial.println(F("Couldn't factory reset"));
        return false;
   }
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   /* Disable command echo from Bluefruit */
   ble.echo(false);
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   Serial.println("Requesting Bluefruit info:");
   /* Print Bluefruit information */
   ble.info();
-
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   /* Change the device name to make it easier to find */
   Serial.println(F("Setting device name to 'SwimForce': "));
@@ -125,60 +131,70 @@ bool setupBluetooth() {
     Serial.print(F("Could not set device name?"));
     return false;
   }
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   Serial.println(F("Adding the Cycling Service (UUID = 0x1816): "));
   if (!ble.sendCommandWithIntReply( F("AT+GATTADDSERVICE=UUID=0x1816"), &cscServiceId)) {
     Serial.println(F("Could not add HRM service"));
     return false;
   }
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   Serial.println(F("Adding the CTC characteristic (UUID = 0x2A5C): "));
   if (!ble.sendCommandWithIntReply( F("AT+GATTADDCHAR=UUID=0x2A5C, PROPERTIES=0x02, MIN_LEN=2, MAX_LEN=2, VALUE=0"), &cscFeatureId)) {
     Serial.println(F("Could not add CTC characteristic"));
     return false;
   }
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   Serial.println(F("Adding the ctc characteristic (UUID = 0x2A5B): "));
   if (!ble.sendCommandWithIntReply( F("AT+GATTADDCHAR=UUID=0x2A5B, PROPERTIES=0x12, MIN_LEN=1, MAX_LEN=11, VALUE=00-00-00-00-00-00-00-00-00-00-00"), &cscMeasureId)) {
     Serial.println(F("Could not add CTC characteristic"));
     return false;
   }
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   Serial.println(F("Adding the ctc Location (UUID = 0x2A5D): "));
   if (!ble.sendCommandWithIntReply( F("AT+GATTADDCHAR=UUID=0x2A5D, PROPERTIES=0x02, MIN_LEN=1, MAX_LEN=1, VALUE=0"), &cscLocationId)) {
     Serial.println(F("Could not add CTC characteristic"));
     return false;
   }
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   Serial.println(F("Adding the ctc Location (UUID = 0x2A55): "));
   if (!ble.sendCommandWithIntReply( F("AT+GATTADDCHAR=UUID=0x2A55, PROPERTIES=0x28, MIN_LEN=1, MAX_LEN=5, VALUE=0"), &cscControlPointId)) {
     Serial.println(F("Could not add CTC characteristic"));
     return false;
   }
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
-   Serial.println(F("Adding the Cycling Power Service (UUID = 0x1818): "));
+  Serial.println(F("Adding the Cycling Power Service (UUID = 0x1818): "));
   if (!ble.sendCommandWithIntReply( F("AT+GATTADDSERVICE=UUID=0x1818"), &pwrServiceId)) {
     Serial.println(F("Could not add HRM service"));
     return false;
   }
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   Serial.println(F("Adding the power characteristic (UUID = 0x2A65): "));
   if (!ble.sendCommandWithIntReply( F("AT+GATTADDCHAR=UUID=0x2A65, PROPERTIES=0x02, MIN_LEN=4, MAX_LEN=4, VALUE=0"), &pwrFeatureId)) {
     Serial.println(F("Could not add CTC characteristic"));
     return false;
   }
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   Serial.println(F("Adding the power measurement characteristic (UUID = 0x2A63): "));
   if (!ble.sendCommandWithIntReply( F("AT+GATTADDCHAR=UUID=0x2A63, PROPERTIES=0x12, MIN_LEN=4, MAX_LEN=14, VALUE=00-00-00-00-00-00"), &pwrMeasureId)) {
     Serial.println(F("Could not add CTC characteristic"));
     return false;
   }
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   Serial.println(F("Adding the power Location (UUID = 0x2A5D): "));
   if (!ble.sendCommandWithIntReply( F("AT+GATTADDCHAR=UUID=0x2A5D, PROPERTIES=0x02, MIN_LEN=1, MAX_LEN=1, VALUE=0"), &pwrLocationId)) {
     Serial.println(F("Could not add CTC characteristic"));
     return false;
   }
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   if (!ble.sendCommandCheckOK(
             F("AT+GAPSETADVDATA="
@@ -190,10 +206,12 @@ bool setupBluetooth() {
     Serial.print(F("Could not set Advertising data?"));
     return false;
   }
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   /* Reset the device for the new service setting changes to take effect */
   Serial.print(F("Performing a SW reset (service changes require a reset): "));
   ble.reset();
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   uint8_t data[2] = {0};
   uint8_t base = 0;
@@ -201,15 +219,18 @@ bool setupBluetooth() {
   uint16_t featureFlags = 0x0003;
   APPEND_BUFFER(data, base, featureFlags);
   BLEsetChar(ble, cscFeatureId, data, base);
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   base = 0;
   uint8_t locationFlags = 0x03;
   APPEND_BUFFER(data, base, locationFlags);
   BLEsetChar(ble, cscLocationId, data, base);
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   base = 0;
   APPEND_BUFFER(data, base, locationFlags);
   BLEsetChar(ble, pwrLocationId, data, base);
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   base = 0;
   // Set bits 2,3,7 (rev data + accumulated energy)
@@ -217,6 +238,7 @@ bool setupBluetooth() {
   uint32_t powerFeatureFlags = 0x00000080;
   APPEND_BUFFER(data, base, powerFeatureFlags);
   BLEsetChar(ble, pwrFeatureId, data, base);
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   Serial.println();
 
@@ -303,9 +325,8 @@ void writeBluetooth(long time, float distance, float power, float energy, bool s
 }
 
 void testDisplays() {
-
   for (int i = 1; i < 200; i++) {
-    writeNumberToBarChart(((float) i) / 100);
+    writeNumberToBarChart(i, 200);
     if (i % 50 == 0) {
       digitalWrite(powerLED, HIGH);
       digitalWrite(buttonLED, LOW);
@@ -317,9 +338,7 @@ void testDisplays() {
   }
 }
 
-void writeNumberToBarChart(float num) {
-  // Maximum number for the input
-  const float maxNum = 2.0;
+void writeNumberToBarChart(float num, float maxNum) {
   // Maximum number of LEDs
   const int ledNum = 24;
   // LED boundaries
@@ -348,10 +367,10 @@ void writeNumberToBarChart(float num) {
 
 long lastDisplay = 0;
 
-void displayTime(long millis) {
-    long minutes = millis / 60000;
-    long seconds = (millis / 1000) - (minutes * 60);
-    long displayNum = minutes * 100 + seconds;
+void displayTime(unsigned long millis) {
+    unsigned long minutes = millis / 60000;
+    unsigned long seconds = (millis / 1000) - (minutes * 60);
+    unsigned long displayNum = minutes * 100 + seconds;
     bool blinkColon = (seconds % 2) == 0;
 
     matrix2.print(displayNum, DEC);
@@ -460,7 +479,7 @@ bool isNewStroke(float forceNow, float &aveForce) {
 
 const int maxStrokeAvePoints = 10;
 // These are the timestamps at which each stroke occurred
-int strokeTimes[maxStrokeAvePoints];
+unsigned long strokeTimes[maxStrokeAvePoints];
 int lastPointSR = 0;
 
 void resetAverageStrokeRate() {
@@ -470,24 +489,78 @@ void resetAverageStrokeRate() {
   lastPointSR = 0;
 }
 
-float computeAverageStrokeRate(bool isNewStroke, int movingTime) {
-
-  if (isNewStroke) {
-    strokeTimes[lastPointSR] = movingTime;
-    lastPointSR++;
-    if (lastPointSR >= maxStrokeAvePoints) {
-      lastPointSR = 0;
+// Get the index of the earliest measurement
+// This is more difficult if the strokeTimes array hasn't filled up yet
+int computeEarliestStrokeIndex(int &nPoints) {
+  // First check array values:
+  int i = 0;
+  for (i = 0; i < maxStrokeAvePoints; i++) {
+    if (strokeTimes[i] == 0) {
+      break;
     }
   }
+  if (i < maxStrokeAvePoints) {
+    // So far have filled i - 1
+    nPoints = i - 1;
+    return 0;
+  } else {
+    nPoints = maxStrokeAvePoints - 1;
+  }
+  return lastPointSR;
+}
+
+void updateStrokeArray(bool newStroke, unsigned long movingTime) {
+    if (newStroke) {
+      strokeTimes[lastPointSR] = movingTime;
+      lastPointSR++;
+      if (lastPointSR >= maxStrokeAvePoints) {
+        lastPointSR = 0;
+      }
+  }
+}
+
+float computeAverageStrokeRate(bool newStroke, unsigned long movingTime) {
+
+  updateStrokeArray(newStroke, movingTime);
 
   // Compute most recent reading
+  int nPoints = 0;
+  int earliestTimeIndex = computeEarliestStrokeIndex(nPoints);
   int latestTimeIndex = (lastPointSR == 0) ? maxStrokeAvePoints - 1 : lastPointSR - 1;
-  int latestTime = strokeTimes[latestTimeIndex];
 
   // Just take the current time minus the earliest time
-  int deltaT = latestTime - strokeTimes[lastPointSR]; // in ms
+  int deltaT = strokeTimes[latestTimeIndex] - strokeTimes[earliestTimeIndex]; // in ms
 
-  return 1000.0 * ((float) (maxStrokeAvePoints - 1) / (float) deltaT); // in per second
+#ifdef DEBUG
+  if (newStroke) {
+    Serial.print("strokeTimes = [ ");
+    for (int i = 0; i < maxStrokeAvePoints; i++) {
+      Serial.print(strokeTimes[i]);
+      if (i == lastPointSR) {
+        Serial.print("*");
+      }
+      if (i < maxStrokeAvePoints - 1) {
+        Serial.print(", ");
+      }
+    }  
+    Serial.println("]");
+
+    Serial.print("nPoints: ");
+    Serial.print(nPoints);
+    Serial.print(" earliestTimeIndex: ");
+    Serial.print(earliestTimeIndex);
+    Serial.print(" latestTimeIndex: ");
+    Serial.print(latestTimeIndex);
+    Serial.print(" deltaT: ");
+    Serial.println(deltaT);  
+  }
+#endif
+
+  if (nPoints <= 0) {
+    return 0;
+  }
+
+  return 1000.0 * ((float) (nPoints) / (float) deltaT); // in per second
 }
 
 void setup() {
@@ -499,27 +572,39 @@ void setup() {
   bar.begin(0x72);
   alpha.begin(0x73);
 
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
+
   matrix2.print("Swim");
   matrix.print("Force");
   matrix.writeDisplay();
   matrix2.writeDisplay();
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   scale.begin(DOUT, CLK);
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
+
   scale.set_scale(calibration_factor);
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
+
   scale.tare(); //Reset the scale to 0
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   pinMode(powerLED, OUTPUT);
   pinMode(buttonLED, OUTPUT);
   pinMode(boardLED, OUTPUT);
   // initialize the pushbutton pin as an input:
   pinMode(buttonPin, INPUT);
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   blueToothSetup = setupBluetooth();
 
   resetStrokeRate();
-  resetAverageStrokeRate();
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
 
-  testDisplays();
+  resetAverageStrokeRate();
+  writeNumberToBarChart(++setupStep, maxSetupSteps);
+
+  // testDisplays();
   // Reset the time
   lastMeasure = millis();
 }
@@ -543,11 +628,13 @@ void loop() {
     scale.tare(); //Reset the scale to 0
     resetStrokeRate();
     resetAverageStrokeRate();
+    // Finally reset measurement time
+    lastMeasure = millis();
   } else {
     digitalWrite(buttonLED, LOW);
   }
 
-  long deltaT = millis() - lastMeasure;
+  unsigned long deltaT = millis() - lastMeasure;
   if (deltaT > 100) {
     lastMeasure = millis();
     totalTime += deltaT;
@@ -623,7 +710,7 @@ void loop() {
 
       displayNumber(alpha, power);
 
-      matrix.print(power);
+      matrix.print(averageStrokeRate);
       matrix.writeDisplay();
 
       if (power > 0.0) {
@@ -638,7 +725,7 @@ void loop() {
 
     displayTime(movingTime);
 
-    writeNumberToBarChart(velocity);
+    writeNumberToBarChart(velocity, 2.0);
 
 #ifdef DEBUG
     Serial.print("Force: ");
