@@ -410,7 +410,8 @@ void displayNumber(Adafruit_AlphaNum4 &dis, float num) {
 #ifdef SIMULATE
 float simulateForce(long t) {
     // Make a sinusoidal simulated force on top of a constant with some noise
-    return 5.0 * sin(2.0 * 3.14159 * ((float)t / 2000.0)) + 50.0 + random(0, 1);
+    // These numbers correspond to 50m in 1 minute
+    return 5.0 * sin(2.0 * 3.14159 * ((float)t / 1900.0)) + 35.0 + random(0, 1);
 }
 #endif
 
@@ -611,6 +612,9 @@ void setup() {
 
 void loop() {
 
+  float averageStrokeRate = 0.0;
+  float power = 0.0;
+
   // read the state of the pushbutton value:
   int buttonState = digitalRead(buttonPin);
 
@@ -700,18 +704,13 @@ void loop() {
       float aveForce = force;
       // Flags whether this time sample looks like a new stroke
       bool stroke = isNewStroke(force, aveForce);
-      float averageStrokeRate = computeAverageStrokeRate(stroke, movingTime);
+      averageStrokeRate = computeAverageStrokeRate(stroke, movingTime);
 
       // This power is just the power to overcome the drag force
       // float power = velocity * force; // W
 
       // Compute total power:
-      float power = force * zeroNinePiSquared * averageStrokeRate * armLength; // W
-
-      displayNumber(alpha, power);
-
-      matrix.print(averageStrokeRate);
-      matrix.writeDisplay();
+      power = force * zeroNinePiSquared * averageStrokeRate * armLength; // W
 
       if (power > 0.0) {
         energy += power * deltaT * 1e-6; // kJ
@@ -720,8 +719,8 @@ void loop() {
       writeBluetooth(movingTime, distance, power, energy, stroke);
     }
 
-//    matrix.print(distance);
-//    matrix.writeDisplay();
+    matrix.print(distance);
+    matrix.writeDisplay();
 
     displayTime(movingTime);
 
@@ -740,17 +739,23 @@ void loop() {
     Serial.print(distance, 1);
     Serial.println();
 #endif
-  }
 
-  //Each second blink the status LED
-  if (millis() - lastTime > 1000)
-  {
-    lastTime = millis();
-    if (digitalRead(powerLED) == LOW) {
-      digitalWrite(powerLED, HIGH);
-    } else {
-      digitalWrite(powerLED, LOW);
+    //Each second blink the status LED
+    if (millis() - lastTime > 1000)
+    {   
+      lastTime = millis();
+      if (digitalRead(powerLED) == LOW) {
+        digitalWrite(powerLED, HIGH);
+      } else {
+        digitalWrite(powerLED, LOW);
+      }
+    
+      // Update displays
+      displayNumber(alpha, power);
+
+      //matrix.print(averageStrokeRate);
+      //matrix.writeDisplay();
     }
-  
+
   }
 }
