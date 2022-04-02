@@ -326,17 +326,24 @@ void writeBluetooth(long time, float distance, float power, float energy, bool s
 }
 
 void testDisplays() {
-  for (int i = 1; i < 200; i++) {
-    writeNumberToBarChart(i, 200);
-    if (i % 50 == 0) {
-      digitalWrite(powerLED, HIGH);
-      digitalWrite(buttonLED, LOW);
-    } else {
-      digitalWrite(powerLED, LOW);
-      digitalWrite(buttonLED, HIGH);
-    }
-    delay(10);
-  }
+
+  matrix2.print("Swim");
+  matrix.print("Force");
+  matrix.writeDisplay();
+  matrix2.writeDisplay();
+  
+  alpha.writeDigitAscii(0, 'S');
+  alpha.writeDigitAscii(1, 'w');
+  alpha.writeDigitAscii(2, 'i');
+  alpha.writeDigitAscii(3, 'm'); 
+  alpha.writeDisplay();
+
+  alpha2.writeDigitAscii(0, 'F');
+  alpha2.writeDigitAscii(1, 'o');
+  alpha2.writeDigitAscii(2, 'r');
+  alpha2.writeDigitAscii(3, 'c'); 
+  alpha2.writeDisplay();
+
 }
 
 void writeNumberToBarChart(float num, float maxNum) {
@@ -577,10 +584,7 @@ void setup() {
 
   writeNumberToBarChart(++setupStep, maxSetupSteps);
 
-  matrix2.print("Swim");
-  matrix.print("Force");
-  matrix.writeDisplay();
-  matrix2.writeDisplay();
+  testDisplays();
   writeNumberToBarChart(++setupStep, maxSetupSteps);
 
   scale.begin(DOUT, CLK);
@@ -607,7 +611,6 @@ void setup() {
   resetAverageStrokeRate();
   writeNumberToBarChart(++setupStep, maxSetupSteps);
 
-  // testDisplays();
   // Reset the time
   lastMeasure = millis();
 }
