@@ -400,7 +400,10 @@ void displayTime(unsigned long millis) {
     matrix2.writeDisplay();
 }
 
-void displayNumber(Adafruit_AlphaNum4 &dis, float num, int shift) {
+void displayNumber(Adafruit_AlphaNum4 &dis, unsigned int num, unsigned int shift) {
+  if (num > 9999) {
+    num = 9999;
+  }
   int thousands = num / 1000;
   int hundreds = (num - (1000 * thousands)) / 100;
   int tens = (num - (1000 * thousands) - (100 * hundreds)) / 10;
