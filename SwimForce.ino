@@ -31,7 +31,7 @@
 #include "src/BluefruitConfig/BluefruitConfig.h"
 
 //#define DEBUG
-#define SIMULATE
+//#define SIMULATE
 
 #define APPEND_BUFFER(buffer,base,field) \
     memcpy(buffer+base,&field,sizeof(field)); \
@@ -726,7 +726,11 @@ void loop() {
       // float power = velocity * force; // W
 
       // Compute total power:
-      power = force * zeroNinePiSquared * averageStrokeRate * armLength; // W
+      // This is in theory more accurate, but in practice averageStrokeRate is unreliable
+      // power = force * zeroNinePiSquared * averageStrokeRate * armLength; // W
+
+      // Compute total power assuming froude number of nu_froude = 0.298
+      power = velocity * force / 0.298;
 
       if (power > 0.0) {
         energy += power * deltaT * 1e-6; // kJ
