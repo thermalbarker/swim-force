@@ -424,7 +424,7 @@ void displayPower(float power) {
 }
 
 void displayStroke(float strokeRate) {
-  alpha2.writeDigitAscii(2, 'p');
+  alpha2.writeDigitAscii(2, '/');
   alpha2.writeDigitAscii(3, 'm');
   displayNumber(alpha2, strokeRate * 60, -2);
 }
@@ -632,7 +632,7 @@ void setup() {
 void loop() {
 
   float averageStrokeRate = 0.0;
-  float power = 0.0;
+  float averagePower = 0.0;
 
   // read the state of the pushbutton value:
   int buttonState = digitalRead(buttonPin);
@@ -680,11 +680,12 @@ void loop() {
     // and K = 1 / sqrt(k)
     // Assuming n = 2 to simplify calculations, then
     // 0.2 < K < 0.25 
+    static const float K = 0.1416;
     float velocity = 0.0;
     // Only measure if the force is positive
     // to avoid negative velocities
     if (force > 0.0) {
-        velocity = 0.1416 * sqrt(force); // ms-1
+        velocity = K * sqrt(force); // ms-1
     }
     float deltaD = velocity * deltaT * 1e-3; // m
 
@@ -733,7 +734,10 @@ void loop() {
       // power = force * zeroNinePiSquared * averageStrokeRate * armLength; // W
 
       // Compute total power assuming froude number of nu_froude = 0.298
-      power = velocity * force / 0.298;
+      static const float nu_froude = 0.298;
+      float power = velocity * force / nu_froude; // W
+      // Also calculate the running average power for the display
+      averagePower = K * sqrt(aveForce) * aveForce / nu_froude;
 
       if (power > 0.0) {
         energy += power * deltaT * 1e-6; // kJ
@@ -774,7 +778,7 @@ void loop() {
       }
     
       // Update displays
-      displayPower(power);
+      displayPower(averagePower);
       displayStroke(averageStrokeRate);
 
       //matrix.print(averageStrokeRate);
